@@ -19,26 +19,28 @@ module Main (C: CONSOLE) (N: NETWORK) (Clock : V1.CLOCK) = struct
     Str.split_delim (Str.regexp "\n") s |>
     List.iter (fun line -> C.log c line)
 
+  let log_lwt c s = Lwt.return (log c s)
+
   let of_interest dest net =
     Macaddr.compare dest (N.mac net) = 0 || not (Macaddr.is_unicast dest)
 
   let input_dhcp c net config dbr buf =
     let open Dhcp_server.Input in
+    let open Lwt in
     match (Dhcp_wire.pkt_of_buf buf (Cstruct.len buf)) with
-    | `Error e -> Lwt.return (log c (red "Can't parse packet: %s" e))
+    | `Error e -> log_lwt c (red "Can't parse packet: %s" e)
     | `Ok pkt ->
       match (input_pkt config !dbr pkt (Clock.time ())) with
-      | Silence -> Lwt.return_unit
-      | Update db -> dbr := db; Lwt.return_unit
-      | Warning w -> Lwt.return (log c (yellow "%s" w))
-      | Error e -> Lwt.return (log c (red "%s" e))
+      | Silence -> return_unit
+      | Update db -> return (dbr := db)
+      | Warning w -> log_lwt c (yellow "%s" w)
+      | Error e -> log_lwt c (red "%s" e)
       | Reply (reply, db)  ->
         log c (blue "Received packet %s" (Dhcp_wire.pkt_to_string pkt));
         N.write net (Dhcp_wire.buf_of_pkt reply)
         >>= fun () ->
         log c (blue "Sent reply packet %s" (Dhcp_wire.pkt_to_string reply));
-        dbr := db;
-        Lwt.return_unit
+        return (dbr := db)
 
   let start c net _ =
     let or_error c name fn t =
